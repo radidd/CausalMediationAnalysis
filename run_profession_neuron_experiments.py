@@ -5,10 +5,16 @@ import os
 from datetime import datetime
 
 import torch
-from transformers import GPT2Tokenizer
+from torch.utils.data import DataLoader
+#from transformers import GPT2Tokenizer
 
 from experiment import Intervention, Model
 from utils import convert_results_to_pd
+
+from UNITER.data import (DetectFeatLmdb, TxtTokLmdb,
+                  PrefetchLoader, TokenBucketSampler,
+                  Nlvr2PairedEvalDataset, Nlvr2TripletEvalDataset,
+                  nlvr2_paired_eval_collate, nlvr2_triplet_eval_collate)
 
 parser = argparse.ArgumentParser(description="Run a set of neuron experiments.")
 
@@ -48,68 +54,31 @@ def get_profession_list():
     return word_list
 
 
-def get_template_list(indices=None):
-    # Get list of all considered templates
-    # "That" sentences are ours
-    # "Because" sentences are a subset
-    # from https://arxiv.org/pdf/1807.11714.pdf (Lu et al.)
-    templates = [
-        "The {} said that",
-        "The {} yelled that",
-        "The {} whispered that",
-        "The {} wanted that",
-        "The {} desired that",
-        "The {} wished that",
-        "The {} ate because",
-        "The {} ran because",
-        "The {} drove because",
-        "The {} slept because",
-        "The {} cried because",
-        "The {} laughed because",
-        "The {} went home because",
-        "The {} stayed up because",
-        "The {} was fired because",
-        "The {} was promoted because",
-        "The {} yelled because",
-    ]
-    if indices:
-        subset_templates = [templates[i - 1] for i in indices]
-        print("subset of templates:", subset_templates)
-        return subset_templates
-
-    return templates
-
 # TODO-RADI: change to negation direct and indirect
 def get_intervention_types():
     return [
-        "man_direct",
-        "man_indirect",
-        "woman_direct",
-        "woman_indirect",
+        "negate_direct",
+        "negate_indirect"
     ]
 
 
-# TODO-RADI: load pairs of examples
-def construct_interventions(base_sent, professions, tokenizer, DEVICE):
-    interventions = {}
-    all_word_count = 0
-    used_word_count = 0
-    for p in professions:
-        all_word_count += 1
-        try:
-            interventions[p] = Intervention(
-                tokenizer, base_sent, [p, "man", "woman"], ["he", "she"], device=DEVICE
-            )
-            used_word_count += 1
-        except:
-            pass
-    print(
-        "\t Only used {}/{} professions due to tokenizer".format(
-            used_word_count, all_word_count
-        )
-    )
-    return interventions
-
+def load_examples():
+    # TODO-RADI: this is currently copied over from inf_nlvr2.py; load in pairs
+    img_db = DetectFeatLmdb(opts.img_db,
+                            train_opts.conf_th, train_opts.max_bb,
+                            train_opts.min_bb, train_opts.num_bb,
+                            opts.compressed_db)
+    txt_db = TxtTokLmdb(opts.txt_db, -1)
+    dset = EvalDatasetCls(txt_db, img_db, train_opts.use_img_type)
+    batch_size = (train_opts.val_batch_size if opts.batch_size is None
+                  else opts.batch_size)
+    sampler = TokenBucketSampler(dset.lens, bucket_size=BUCKET_SIZE,
+                                 batch_size=batch_size, droplast=False)
+    eval_dataloader = DataLoader(dset, batch_sampler=sampler,
+                                 num_workers=opts.n_workers,
+                                 pin_memory=opts.pin_mem,
+                                 collate_fn=eval_collate_fn)
+    eval_dataloader = PrefetchLoader(eval_dataloader)
 
 def run_all(
     model_type="gpt2",
@@ -120,13 +89,17 @@ def run_all(
 ):
     print("Model:", model_type, flush=True)
     # Set up all the potential combinations.
-    professions = get_profession_list()
-    templates = get_template_list(template_indices)
+    # TODO-RADI: we don't need these since we iterate over already constructed examples
+    # professions = get_profession_list()
+    # templates = get_template_list(template_indices)
+    # TODO-RADI: implement the loading function
+    loaded_examples = load_examples()
     intervention_types = get_intervention_types()
 
     # Initialize Model and Tokenizer.
     # TODO-RADI: initialise UNITER
-    tokenizer = GPT2Tokenizer.from_pretrained(model_type)
+    # TODO-RADI: we don't need the tokenizer cause the data is already preprocessed
+    # tokenizer = GPT2Tokenizer.from_pretrained(model_type)
     model = Model(device=device, gpt2_version=model_type, random_weights=random_weights)
 
     # Set up folder if it does not exist.
@@ -140,16 +113,19 @@ def run_all(
 
     # Iterate over all possible templates.
     # TODO-RADI: iterate over the constructed examples
-    for temp in templates:
-        print("Running template '{}' now...".format(temp), flush=True)
-        # Fill in all professions into current template
-        interventions = construct_interventions(temp, professions, tokenizer, device)
+    # for temp in templates:
+    for example_pair in loaded_examples:
+        # TODO-RADI: don't need this
+        # print("Running template '{}' now...".format(temp), flush=True)
+        # # Fill in all professions into current template
+        # interventions = construct_interventions(temp, professions, tokenizer, device)
         # Consider all the intervention types
         for itype in intervention_types:
             print("\t Running with intervention: {}".format(itype), flush=True)
             # Run actual exp.
+            # TODO-RADI: make sure the neuron_intervention_experiment function takes an example pair as input
             intervention_results = model.neuron_intervention_experiment(
-                interventions, itype, alpha=1.0
+                example_pair, itype, alpha=1.0
             )
 
             df = convert_results_to_pd(interventions, intervention_results)

@@ -12,6 +12,8 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from attention_intervention_model import AttentionOverride
 from utils import batch, convert_results_to_pd
 
+from UNITER.model.nlvr2 import UniterForNlvr2Triplet 
+
 np.random.seed(1)
 torch.manual_seed(1)
 
