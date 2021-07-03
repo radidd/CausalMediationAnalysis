@@ -100,7 +100,12 @@ def run_all(
     # TODO-RADI: initialise UNITER
     # TODO-RADI: we don't need the tokenizer cause the data is already preprocessed
     # tokenizer = GPT2Tokenizer.from_pretrained(model_type)
-    model = Model(device=device, gpt2_version=model_type, random_weights=random_weights)
+    # TODO-RADI: model files; pass as argument
+    ckpt_file = f'{opts.train_dir}/ckpt/model_step_{opts.ckpt}.pt'
+    model_config = UniterConfig.from_json_file(
+        f'{opts.train_dir}/log/model.json')
+    # TODO-RADI: make sure to pass all necessary parameters
+    model = Model(ckpt_file, model_config, device=device, gpt2_version=model_type, random_weights=random_weights)
 
     # Set up folder if it does not exist.
     dt_string = datetime.now().strftime("%Y%m%d")

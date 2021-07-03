@@ -12,7 +12,9 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from attention_intervention_model import AttentionOverride
 from utils import batch, convert_results_to_pd
 
-from UNITER.model.nlvr2 import UniterForNlvr2Triplet 
+from UNITER.model.nlvr2 import UniterForNlvr2Triplet
+
+from apex import amp
 
 np.random.seed(1)
 torch.manual_seed(1)
@@ -59,6 +61,8 @@ class Model():
     Wrapper for all model logic
     '''
     def __init__(self,
+                 ckpt_file,
+                 model_config,
                  device='cpu',
                  output_attentions=False,
                  random_weights=False,
@@ -67,11 +71,19 @@ class Model():
         self.device = device
 
         # TODO-RADI: load UNITER
-        self.model = GPT2LMHeadModel.from_pretrained(
-            gpt2_version,
-            output_attentions=output_attentions)
-        self.model.eval()
+        # self.model = GPT2LMHeadModel.from_pretrained(
+        #     gpt2_version,
+        #     output_attentions=output_attentions)
+
+
+        checkpoint = torch.load(ckpt_file)
+        self.model = UniterForNlvr2Triplet(model_config, img_dim=IMG_DIM)
+        self.model.init_type_embedding()
+        self.model.load_state_dict(checkpoint, strict=False)
         self.model.to(device)
+        self.model = amp.initialize(model, enabled=opts.fp16, opt_level='O2')
+
+        # TODO-RADI: this might not work currently
         if random_weights:
             print('Randomizing weights')
             self.model.init_weights()
@@ -88,6 +100,7 @@ class Model():
 
     def get_representations(self, context, position):
         # Hook for saving the representation
+        # TODO-RADI: check how to make this save the [CLS] representation
         def extract_representation_hook(module,
                                         input,
                                         output,
@@ -100,14 +113,14 @@ class Model():
         with torch.no_grad():
             # construct all the hooks
             # word embeddings will be layer -1
-            # TODO-RADI: change to attributes of UNITER
+            # TODO-RADI: change to attributes of UNITER - find what the embedding layer is called
             handles.append(self.model.transformer.wte.register_forward_hook(
                     partial(extract_representation_hook,
                             position=position,
                             representations=representation,
                             layer=-1)))
             # hidden layers
-            # TODO-RADI: change to attributes of UNITER
+            # TODO-RADI: change to attributes of UNITER - find what the hidden layers are called
             for layer in range(self.num_layers):
                 handles.append(self.model.transformer.h[layer]\
                                    .mlp.register_forward_hook(
@@ -123,6 +136,7 @@ class Model():
 
     def get_probabilities_for_examples(self, context, candidates):
         """Return probabilities of single-token candidates given context"""
+        # TODO-RADI: this can be simpler since there are only two options; make sure to get the probabilities from the linear classifier
         for c in candidates:
             if len(c) > 1:
                 raise ValueError(f"Multiple tokens not allowed: {c}")
@@ -176,7 +190,7 @@ class Model():
                             layers,
                             neurons,
                             position,
-                            intervention_type='diff',
+                            intervention_type='replace',
                             alpha=1.):
         # Hook for changing representation during forward pass
         def intervention_hook(module,
