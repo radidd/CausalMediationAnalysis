@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 #from transformers import GPT2Tokenizer
 
-from experiment import Intervention, Model
+from experiment import Model
 from utils import convert_results_to_pd
 
 from UNITER.data import (DetectFeatLmdb, TxtTokLmdb,
