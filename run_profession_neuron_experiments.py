@@ -79,7 +79,7 @@ def get_template_list(indices=None):
 
     return templates
 
-
+# TODO-RADI: change to negation direct and indirect
 def get_intervention_types():
     return [
         "man_direct",
@@ -89,6 +89,7 @@ def get_intervention_types():
     ]
 
 
+# TODO-RADI: load pairs of examples
 def construct_interventions(base_sent, professions, tokenizer, DEVICE):
     interventions = {}
     all_word_count = 0
@@ -122,7 +123,9 @@ def run_all(
     professions = get_profession_list()
     templates = get_template_list(template_indices)
     intervention_types = get_intervention_types()
+
     # Initialize Model and Tokenizer.
+    # TODO-RADI: initialise UNITER
     tokenizer = GPT2Tokenizer.from_pretrained(model_type)
     model = Model(device=device, gpt2_version=model_type, random_weights=random_weights)
 
@@ -136,6 +139,7 @@ def run_all(
         os.makedirs(base_path)
 
     # Iterate over all possible templates.
+    # TODO-RADI: iterate over the constructed examples
     for temp in templates:
         print("Running template '{}' now...".format(temp), flush=True)
         # Fill in all professions into current template

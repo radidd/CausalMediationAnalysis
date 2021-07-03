@@ -63,6 +63,8 @@ class Model():
                  gpt2_version='gpt2'):
         super()
         self.device = device
+
+        # TODO-RADI: load UNITER
         self.model = GPT2LMHeadModel.from_pretrained(
             gpt2_version,
             output_attentions=output_attentions)
@@ -72,6 +74,7 @@ class Model():
             print('Randomizing weights')
             self.model.init_weights()
 
+        # TODO-RADI: change to attributes of UNITER
         # Options
         self.top_k = 5
         # 12 for GPT-2
@@ -95,12 +98,14 @@ class Model():
         with torch.no_grad():
             # construct all the hooks
             # word embeddings will be layer -1
+            # TODO-RADI: change to attributes of UNITER
             handles.append(self.model.transformer.wte.register_forward_hook(
                     partial(extract_representation_hook,
                             position=position,
                             representations=representation,
                             layer=-1)))
             # hidden layers
+            # TODO-RADI: change to attributes of UNITER
             for layer in range(self.num_layers):
                 handles.append(self.model.transformer.h[layer]\
                                    .mlp.register_forward_hook(
@@ -161,6 +166,7 @@ class Model():
             mean_probs.append(mean_token_prob)
         return mean_probs
 
+    # TODO-RADI: we only have replace intervention type; change default;
     def neuron_intervention(self,
                             context,
                             outputs,
@@ -334,6 +340,8 @@ class Model():
             '''
             Compute representations for base terms (one for each side of bias)
             '''
+
+            # TODO-RADI: they compute everything three times for neutral, man, woman; we need it only twice for non-negated and negated;
             base_representations = self.get_representations(
                 intervention.base_strings_tok[0],
                 intervention.position)
@@ -347,6 +355,7 @@ class Model():
             # TODO: this whole logic can probably be improved
             # determine effect type and set representations
 
+            # TODO-RADI: change to our interventions; neg_direct and neg_indirect;
             # e.g. The teacher said that
             if intervention_type == 'man_minus_woman':
                 context = intervention.base_strings_tok[0]
@@ -383,6 +392,7 @@ class Model():
                 raise ValueError(f"Invalid intervention_type: {intervention_type}")
 
             # Probabilities without intervention (Base case)
+            # TODO-RADI: calculate for non-negated and negated; simplify cause candidate 1 and 2 are just true and false (only two candidates in prediction)
             candidate1_base_prob, candidate2_base_prob = self.get_probabilities_for_examples(
                 intervention.base_strings_tok[0].unsqueeze(0),
                 intervention.candidates_tok)[0]
@@ -394,9 +404,12 @@ class Model():
                 intervention.candidates_tok)[0]
             # Now intervening on potentially biased example
             if intervention_loc == 'all':
+              # TODO-RADI: might need to change this for UNITER; also can simplify since the probs add up to 1
+              # TODO-RADI: explanation - i think this stores the output probabilities for the intervention on each of the neurons
               candidate1_probs = torch.zeros((self.num_layers + 1, self.num_neurons))
               candidate2_probs = torch.zeros((self.num_layers + 1, self.num_neurons))
 
+              # TODO-RADI: check if this is correct for UNITER
               for layer in range(-1, self.num_layers):
                 for neurons in batch(range(self.num_neurons), bsize):
                     neurons_to_search = [[i] + neurons_to_adj for i in neurons]
