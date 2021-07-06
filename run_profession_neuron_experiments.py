@@ -62,7 +62,7 @@ def get_intervention_types():
     ]
 
 
-def load_examples():
+def load_examples(opts, train_opts):
     # TODO-RADI: this is currently copied over from inf_nlvr2.py; load in pairs
     img_db = DetectFeatLmdb(opts.img_db,
                             train_opts.conf_th, train_opts.max_bb,
@@ -81,6 +81,7 @@ def load_examples():
     eval_dataloader = PrefetchLoader(eval_dataloader)
 
 def run_all(
+    opts,
     model_type="gpt2",
     device="cuda",
     out_dir=".",
@@ -93,7 +94,8 @@ def run_all(
     # professions = get_profession_list()
     # templates = get_template_list(template_indices)
     # TODO-RADI: implement the loading function
-    loaded_examples = load_examples()
+    train_opts = Struct(json.load(open(f'{opts.train_dir}/log/hps.json')))
+    loaded_examples = load_examples(opts, train_opts)
     intervention_types = get_intervention_types()
 
     # Initialize Model and Tokenizer.
@@ -104,6 +106,7 @@ def run_all(
     ckpt_file = f'{opts.train_dir}/ckpt/model_step_{opts.ckpt}.pt'
     model_config = UniterConfig.from_json_file(
         f'{opts.train_dir}/log/model.json')
+
     # TODO-RADI: make sure to pass all necessary parameters
     model = Model(ckpt_file, model_config, device=device, gpt2_version=model_type, random_weights=random_weights)
 
@@ -144,7 +147,9 @@ def run_all(
 
 if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # TODO-RADI: add the necessary arguments to load the databases
     run_all(
+        opts,
         opt.model,
         device,
         opt.out_dir,

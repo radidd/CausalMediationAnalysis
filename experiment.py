@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+#from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 from attention_intervention_model import AttentionOverride
 from utils import batch, convert_results_to_pd
@@ -232,7 +232,7 @@ class Model():
         """
         run multiple intervention experiments
         """
-
+        # TODO-RADI: probably don't need this function since we only have one intervention each time
         word2intervention_results = {}
         for word in tqdm(word2intervention, desc='words'):
             word2intervention_results[word] = self.neuron_intervention_single_experiment(
@@ -257,51 +257,28 @@ class Model():
             '''
 
             # TODO-RADI: they compute everything three times for neutral, man, woman; we need it only twice for non-negated and negated;
-            base_representations = self.get_representations(
-                intervention.base_strings_tok[0],
+            # TODO-RADI: check that the order of non-negated, negated is right
+            # TODO-RADI: check what the position should be; position of the token whose representation we want?
+            orig_representations = self.get_representations(
+                intervention[0],
                 intervention.position)
-            man_representations = self.get_representations(
-                intervention.base_strings_tok[1],
-                intervention.position)
-            woman_representations = self.get_representations(
-                intervention.base_strings_tok[2],
+            negated_representations = self.get_representations(
+                intervention[1],
                 intervention.position)
 
             # TODO: this whole logic can probably be improved
             # determine effect type and set representations
 
             # TODO-RADI: change to our interventions; neg_direct and neg_indirect;
-            # e.g. The teacher said that
-            if intervention_type == 'man_minus_woman':
-                context = intervention.base_strings_tok[0]
-                rep = {k: v - woman_representations[k]
-                       for k, v in man_representations.items()}
-                replace_or_diff = 'diff'
-            # e.g. The teacher said that
-            elif intervention_type == 'woman_minus_man':
-                context = intervention.base_strings_tok[0]
-                rep = {k: v - man_representations[k]
-                       for k, v in woman_representations.items()}
-                replace_or_diff = 'diff'
-            # e.g. The man said that
-            elif intervention_type == 'man_direct':
-                context = intervention.base_strings_tok[1]
-                rep = base_representations
+            # e.g. There are two dogs.
+            if intervention_type == 'negate_direct':
+                context = intervention[1]
+                rep = orig_representations
                 replace_or_diff = 'replace'
-            # e.g. The teacher said that
-            elif intervention_type == 'man_indirect':
-                context = intervention.base_strings_tok[0]
-                rep = man_representations
-                replace_or_diff = 'replace'
-            # e.g. The woman said that
-            elif intervention_type == 'woman_direct':
-                context = intervention.base_strings_tok[2]
-                rep = base_representations
-                replace_or_diff = 'replace'
-            # e.g. The teacher said that
-            elif intervention_type == 'woman_indirect':
-                context = intervention.base_strings_tok[0]
-                rep = woman_representations
+            # e.g. There aren't two dogs.
+            elif intervention_type == 'negate_indirect':
+                context = intervention[0]
+                rep = negated_representations
                 replace_or_diff = 'replace'
             else:
                 raise ValueError(f"Invalid intervention_type: {intervention_type}")
