@@ -1,5 +1,9 @@
 """Run all the extraction for a model across many templates.
 """
+# add UNITER to directories to search for python packages
+import sys
+sys.path.append('./UNITER/')
+
 import argparse
 import os
 from datetime import datetime
