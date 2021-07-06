@@ -7,56 +7,23 @@ sys.path.append('./UNITER/')
 import argparse
 import os
 from datetime import datetime
+import json
 
 import torch
 from torch.utils.data import DataLoader
 #from transformers import GPT2Tokenizer
 
 from experiment import Model
-from utils import convert_results_to_pd
+from utils_cma import convert_results_to_pd
+
+from horovod import torch as hvd
 
 from UNITER.data import (DetectFeatLmdb, TxtTokLmdb,
                   PrefetchLoader, TokenBucketSampler,
                   Nlvr2PairedEvalDataset, Nlvr2TripletEvalDataset,
                   nlvr2_paired_eval_collate, nlvr2_triplet_eval_collate)
 
-parser = argparse.ArgumentParser(description="Run a set of neuron experiments.")
-
-parser.add_argument(
-    "-model",
-    type=str,
-    default="distilgpt2",
-    help="""Model type [distilgpt2, gpt-2, etc.].""",
-)
-
-parser.add_argument(
-    "-out_dir", default=".", type=str, help="""Path of the result folder."""
-)
-
-parser.add_argument(
-    "-template_indices",
-    nargs="+",
-    type=int,
-    help="Give the indices of templates if you want to run on only a subset",
-)
-
-parser.add_argument(
-    "--randomize", default=False, action="store_true", help="Randomize model weights."
-)
-
-opt = parser.parse_args()
-
-
-def get_profession_list():
-    # Get the list of all considered professions
-    word_list = []
-    with open("experiment_data/professions.json", "r") as f:
-        for l in f:
-            # there is only one line that eval"s to an array
-            for j in eval(l):
-                word_list.append(j[0])
-    return word_list
-
+from UNITER.utils.misc import Struct
 
 # TODO-RADI: change to negation direct and indirect
 def get_intervention_types():
@@ -67,24 +34,41 @@ def get_intervention_types():
 
 
 def load_examples(opts, train_opts):
-    # TODO-RADI: this is currently copied over from inf_nlvr2.py; load in pairs
+    ''' Loads examples in pairs; returns a list of tuples, where each entry is the input for (non-negated version, negated version)
+    '''
+    # TODO: there is probably a more efficient way to load the dataset
+
+    eval_collate_fn = nlvr2_triplet_eval_collate
     img_db = DetectFeatLmdb(opts.img_db,
                             train_opts.conf_th, train_opts.max_bb,
                             train_opts.min_bb, train_opts.num_bb,
                             opts.compressed_db)
     txt_db = TxtTokLmdb(opts.txt_db, -1)
-    dset = EvalDatasetCls(txt_db, img_db, train_opts.use_img_type)
-    batch_size = (train_opts.val_batch_size if opts.batch_size is None
-                  else opts.batch_size)
-    sampler = TokenBucketSampler(dset.lens, bucket_size=BUCKET_SIZE,
-                                 batch_size=batch_size, droplast=False)
-    eval_dataloader = DataLoader(dset, batch_sampler=sampler,
+    dset = Nlvr2TripletEvalDataset(txt_db, img_db, train_opts.use_img_type)
+
+    data_dict = {}
+
+    eval_dataloader = DataLoader(dset, batch_sampler=None,
                                  num_workers=opts.n_workers,
                                  pin_memory=opts.pin_mem,
                                  collate_fn=eval_collate_fn)
-    eval_dataloader = PrefetchLoader(eval_dataloader)
+
+    for i, item in enumerate(eval_dataloader):
+        data_dict[item['qids'][0]] = item
+
+    corresponding_examples = []
+    for id in dset.ids:
+        if "-n-" in id:
+            corresponding_id = "-".join(id.split("-", 4)[0:4])
+            corresponding_tuple = (data_dict[corresponding_id], data_dict[id])
+            corresponding_examples.append(corresponding_tuple)
+
+    data_dict.clear()
+
+    return corresponding_examples
 
 def run_all(
+    args,
     opts,
     model_type="gpt2",
     device="cuda",
@@ -98,10 +82,12 @@ def run_all(
     # professions = get_profession_list()
     # templates = get_template_list(template_indices)
     # TODO-RADI: implement the loading function
-    train_opts = Struct(json.load(open(f'{opts.train_dir}/log/hps.json')))
-    loaded_examples = load_examples(opts, train_opts)
-    intervention_types = get_intervention_types()
+    train_opts = Struct(json.load(open(f'{args.train_dir}/log/hps.json')))
+    loaded_examples = load_examples(args, train_opts)
+    print(len(loaded_examples))
 
+    intervention_types = get_intervention_types()
+    print(intervention_types)
     # Initialize Model and Tokenizer.
     # TODO-RADI: initialise UNITER
     # TODO-RADI: we don't need the tokenizer cause the data is already preprocessed
@@ -151,12 +137,63 @@ def run_all(
 
 if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    hvd.init()
+    parser = argparse.ArgumentParser(description="Run a set of neuron experiments.")
+    # Required parameters
+    parser.add_argument("--txt_db",
+                        type=str, required=True,
+                        help="The input train corpus.")
+    parser.add_argument("--img_db",
+                        type=str, required=True,
+                        help="The input train images.")
+
+    parser.add_argument('--compressed_db', action='store_true',
+                        help='use compressed LMDB')
+    parser.add_argument("--batch_size", type=int,
+                        help="batch size for evaluation")
+    parser.add_argument('--n_workers', type=int, default=4,
+                        help="number of data workers")
+    parser.add_argument('--pin_mem', action='store_true',
+                        help="pin memory")
+    parser.add_argument('--fp16', action='store_true',
+                        help="fp16 inference")
+
+    parser.add_argument("--train_dir", type=str, required=True,
+                        help="The directory storing NLVR2 finetuning output")
+    parser.add_argument("--ckpt", type=int, required=True,
+                        help="specify the checkpoint to run inference")
+
+
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="distilgpt2",
+        help="""Model type [distilgpt2, gpt-2, etc.].""",
+    )
+
+    parser.add_argument(
+        "--out_dir", default=".", type=str, help="""Path of the result folder."""
+    )
+
+    parser.add_argument(
+        "--template_indices",
+        nargs="+",
+        type=int,
+        help="Give the indices of templates if you want to run on only a subset",
+    )
+
+    parser.add_argument(
+        "--randomize", default=False, action="store_true", help="Randomize model weights."
+    )
+    opts = parser.parse_args()
+
+
     # TODO-RADI: add the necessary arguments to load the databases
     run_all(
         opts,
-        opt.model,
+        opts.model,
         device,
-        opt.out_dir,
-        random_weights=opt.randomize,
-        template_indices=opt.template_indices,
+        opts.out_dir,
+        random_weights=opts.randomize,
+        template_indices=opts.template_indices,
     )
