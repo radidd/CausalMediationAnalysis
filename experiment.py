@@ -14,6 +14,8 @@ from utils_cma import batch, convert_results_to_pd
 
 from UNITER.model.nlvr2 import UniterForNlvr2Triplet
 
+from UNITER.utils.const import IMG_DIM
+
 from apex import amp
 
 np.random.seed(1)
@@ -27,6 +29,7 @@ class Model():
     def __init__(self,
                  ckpt_file,
                  model_config,
+                 opts,
                  device='cpu',
                  output_attentions=False,
                  random_weights=False,
@@ -45,7 +48,7 @@ class Model():
         self.model.init_type_embedding()
         self.model.load_state_dict(checkpoint, strict=False)
         self.model.to(device)
-        self.model = amp.initialize(model, enabled=opts.fp16, opt_level='O2')
+        self.model = amp.initialize(self.model, enabled=opts.fp16, opt_level='O2')
 
         # TODO-RADI: this might not work currently
         if random_weights:
@@ -56,12 +59,16 @@ class Model():
         # Options
         self.top_k = 5
         # 12 for GPT-2
-        self.num_layers = len(self.model.transformer.h)
+        #self.num_layers = len(self.model.transformer.h)
+        self.num_layers = model_config.num_hidden_layers
         # 768 for GPT-2
-        self.num_neurons = self.model.transformer.wte.weight.shape[1]
+        #self.num_neurons = self.model.transformer.wte.weight.shape[1]
+        self.num_neurons = model_config.hidden_size
         # 12 for GPT-2
-        self.num_heads = self.model.transformer.h[0].attn.n_head
+        #self.num_heads = self.model.transformer.h[0].attn.n_head
+        self.num_heads = model_config.num_attention_heads
 
+        
     def get_representations(self, context, position):
         # Hook for saving the representation
         # TODO-RADI: check how to make this save the [CLS] representation

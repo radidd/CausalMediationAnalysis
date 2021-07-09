@@ -20,10 +20,12 @@ from horovod import torch as hvd
 
 from UNITER.data import (DetectFeatLmdb, TxtTokLmdb,
                   PrefetchLoader, TokenBucketSampler,
-                  Nlvr2PairedEvalDataset, Nlvr2TripletEvalDataset,
-                  nlvr2_paired_eval_collate, nlvr2_triplet_eval_collate)
+                  Nlvr2TripletEvalDataset, nlvr2_triplet_eval_collate)
+
+from UNITER.model.model import UniterConfig
 
 from UNITER.utils.misc import Struct
+
 
 # TODO-RADI: change to negation direct and indirect
 def get_intervention_types():
@@ -68,7 +70,6 @@ def load_examples(opts, train_opts):
     return corresponding_examples
 
 def run_all(
-    args,
     opts,
     model_type="gpt2",
     device="cuda",
@@ -82,8 +83,8 @@ def run_all(
     # professions = get_profession_list()
     # templates = get_template_list(template_indices)
     # TODO-RADI: implement the loading function
-    train_opts = Struct(json.load(open(f'{args.train_dir}/log/hps.json')))
-    loaded_examples = load_examples(args, train_opts)
+    train_opts = Struct(json.load(open(f'{opts.train_dir}/log/hps.json')))
+    loaded_examples = load_examples(opts, train_opts)
     print(len(loaded_examples))
 
     intervention_types = get_intervention_types()
@@ -94,11 +95,10 @@ def run_all(
     # tokenizer = GPT2Tokenizer.from_pretrained(model_type)
     # TODO-RADI: model files; pass as argument
     ckpt_file = f'{opts.train_dir}/ckpt/model_step_{opts.ckpt}.pt'
-    model_config = UniterConfig.from_json_file(
-        f'{opts.train_dir}/log/model.json')
+    model_config = UniterConfig.from_json_file(f'{opts.train_dir}/log/model.json')
 
     # TODO-RADI: make sure to pass all necessary parameters
-    model = Model(ckpt_file, model_config, device=device, gpt2_version=model_type, random_weights=random_weights)
+    model = Model(ckpt_file, model_config, opts, device=device, gpt2_version=model_type, random_weights=random_weights)
 
     # Set up folder if it does not exist.
     dt_string = datetime.now().strftime("%Y%m%d")
@@ -108,7 +108,7 @@ def run_all(
         base_path = os.path.join(base_path, "random")
     if not os.path.exists(base_path):
         os.makedirs(base_path)
-
+    #
     # Iterate over all possible templates.
     # TODO-RADI: iterate over the constructed examples
     # for temp in templates:
