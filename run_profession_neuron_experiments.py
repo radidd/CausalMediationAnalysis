@@ -54,6 +54,8 @@ def load_examples(opts, train_opts):
                                  num_workers=opts.n_workers,
                                  pin_memory=opts.pin_mem,
                                  collate_fn=eval_collate_fn)
+    eval_dataloader = PrefetchLoader(eval_dataloader)
+
 
     for i, item in enumerate(eval_dataloader):
         data_dict[item['qids'][0]] = item
@@ -87,6 +89,7 @@ def run_all(
     loaded_examples = load_examples(opts, train_opts)
     print(len(loaded_examples))
 
+    #loaded_examples = loaded_examples.to(device)
     intervention_types = get_intervention_types()
     print(intervention_types)
     # Initialize Model and Tokenizer.
@@ -119,25 +122,28 @@ def run_all(
         # interventions = construct_interventions(temp, professions, tokenizer, device)
         # Consider all the intervention types
         for itype in intervention_types:
+            print(len(example_pair))
             print("\t Running with intervention: {}".format(itype), flush=True)
             # Run actual exp.
             # TODO-RADI: make sure the neuron_intervention_experiment function takes an example pair as input
-            intervention_results = model.neuron_intervention_experiment(
+            intervention_results = model.neuron_intervention_single_experiment(
                 example_pair, itype, alpha=1.0
             )
 
-            df = convert_results_to_pd(interventions, intervention_results)
-            # Generate file name.
-            temp_string = "_".join(temp.replace("{}", "X").split())
-            model_type_string = model_type
-            fname = "_".join([temp_string, itype, model_type_string])
-            # Finally, save each exp separately.
-            df.to_csv(os.path.join(base_path, fname + ".csv"))
-
+            # df = convert_results_to_pd(interventions, intervention_results)
+            # # Generate file name.
+            # temp_string = "_".join(temp.replace("{}", "X").split())
+            # model_type_string = model_type
+            # fname = "_".join([temp_string, itype, model_type_string])
+            # # Finally, save each exp separately.
+            # df.to_csv(os.path.join(base_path, fname + ".csv"))
+            #
 
 if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     hvd.init()
+
     parser = argparse.ArgumentParser(description="Run a set of neuron experiments.")
     # Required parameters
     parser.add_argument("--txt_db",

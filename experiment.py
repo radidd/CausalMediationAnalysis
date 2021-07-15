@@ -30,13 +30,13 @@ class Model():
                  ckpt_file,
                  model_config,
                  opts,
-                 device='cpu',
+                 device='cuda',
                  output_attentions=False,
                  random_weights=False,
                  gpt2_version='gpt2'):
         super()
         self.device = device
-
+        
         # TODO-RADI: load UNITER
         # self.model = GPT2LMHeadModel.from_pretrained(
         #     gpt2_version,
@@ -47,14 +47,22 @@ class Model():
         self.model = UniterForNlvr2Triplet(model_config, img_dim=IMG_DIM)
         self.model.init_type_embedding()
         self.model.load_state_dict(checkpoint, strict=False)
-        self.model.to(device)
-        self.model = amp.initialize(self.model, enabled=opts.fp16, opt_level='O2')
-
+        self.model.to(self.device)
+        #print(type(self.model))
+        #print(self.model)
+        self.model, _ = amp.initialize(self.model, enabled=opts.fp16, opt_level='O2')
+        self.model.eval()
+        #print(type(self.model[0]))
+        #print(self.model)
         # TODO-RADI: this might not work currently
         if random_weights:
             print('Randomizing weights')
             self.model.init_weights()
 
+        #print(self.model[0].uniter)
+        #print(dir(self.model[0].uniter))
+        #print(dir(self.model[0].uniter.encoder))
+        #print(dir(self.model[0].uniter.encoder.layer[0]))
         # TODO-RADI: change to attributes of UNITER
         # Options
         self.top_k = 5
@@ -68,8 +76,8 @@ class Model():
         #self.num_heads = self.model.transformer.h[0].attn.n_head
         self.num_heads = model_config.num_attention_heads
 
-        
-    def get_representations(self, context, position):
+
+    def get_representations(self, context, position=0):
         # Hook for saving the representation
         # TODO-RADI: check how to make this save the [CLS] representation
         def extract_representation_hook(module,
@@ -85,21 +93,26 @@ class Model():
             # construct all the hooks
             # word embeddings will be layer -1
             # TODO-RADI: change to attributes of UNITER - find what the embedding layer is called
-            handles.append(self.model.transformer.wte.register_forward_hook(
+            handles.append(self.model.uniter.embeddings.register_forward_hook(
                     partial(extract_representation_hook,
                             position=position,
                             representations=representation,
                             layer=-1)))
             # hidden layers
             # TODO-RADI: change to attributes of UNITER - find what the hidden layers are called
+            # TODO-RADI: BertLayer has attention, intermediate and output - which one should we intervene on?
             for layer in range(self.num_layers):
-                handles.append(self.model.transformer.h[layer]\
-                                   .mlp.register_forward_hook(
+                handles.append(self.model.uniter.encoder.layer[layer]\
+                                   .output.register_forward_hook(
                     partial(extract_representation_hook,
                             position=position,
                             representations=representation,
                             layer=layer)))
-            logits, past = self.model(context)
+            #print(context)
+            # print(handles[0])
+            # print(next(self.model.parameters()).device)
+            # print(self.device)
+            logits = self.model(context, compute_loss=False)
             for h in handles:
                 h.remove()
         # print(representation[0][:5])
@@ -229,24 +242,24 @@ class Model():
         return new_probabilities
 
 
-    def neuron_intervention_experiment(self,
-                                       word2intervention,
-                                       intervention_type,
-                                       layers_to_adj=[],
-                                       neurons_to_adj=[],
-                                       alpha=1,
-                                       intervention_loc='all'):
-        """
-        run multiple intervention experiments
-        """
-        # TODO-RADI: probably don't need this function since we only have one intervention each time
-        word2intervention_results = {}
-        for word in tqdm(word2intervention, desc='words'):
-            word2intervention_results[word] = self.neuron_intervention_single_experiment(
-                word2intervention[word], intervention_type, layers_to_adj, neurons_to_adj,
-                alpha, intervention_loc=intervention_loc)
-
-        return word2intervention_results
+    # def neuron_intervention_experiment(self,
+    #                                    word2intervention,
+    #                                    intervention_type,
+    #                                    layers_to_adj=[],
+    #                                    neurons_to_adj=[],
+    #                                    alpha=1,
+    #                                    intervention_loc='all'):
+    #     """
+    #     run multiple intervention experiments
+    #     """
+    #     # TODO-RADI: probably don't need this function since we only have one intervention each time
+    #     word2intervention_results = {}
+    #     for word in tqdm(word2intervention, desc='words'):
+    #         word2intervention_results[word] = self.neuron_intervention_single_experiment(
+    #             word2intervention[word], intervention_type, layers_to_adj, neurons_to_adj,
+    #             alpha, intervention_loc=intervention_loc)
+    #
+    #     return word2intervention_results
 
     def neuron_intervention_single_experiment(self,
                                               intervention,
@@ -266,13 +279,15 @@ class Model():
             # TODO-RADI: they compute everything three times for neutral, man, woman; we need it only twice for non-negated and negated;
             # TODO-RADI: check that the order of non-negated, negated is right
             # TODO-RADI: check what the position should be; position of the token whose representation we want?
+            # TODO-RADI: default position to 0 which should be [CLS] but double check!!!
             orig_representations = self.get_representations(
                 intervention[0],
-                intervention.position)
+                position=0)
             negated_representations = self.get_representations(
                 intervention[1],
-                intervention.position)
+                position=0)
 
+            #print(orig_representations)
             # TODO: this whole logic can probably be improved
             # determine effect type and set representations
 
