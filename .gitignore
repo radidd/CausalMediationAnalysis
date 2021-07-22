@@ -130,3 +130,6 @@ dmypy.json
 
 # Data and models
 data_models/
+neg_test.json
+results/
+venv/

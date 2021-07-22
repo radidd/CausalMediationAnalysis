@@ -36,7 +36,7 @@ class Model():
                  gpt2_version='gpt2'):
         super()
         self.device = device
-        
+
         # TODO-RADI: load UNITER
         # self.model = GPT2LMHeadModel.from_pretrained(
         #     gpt2_version,
@@ -59,6 +59,8 @@ class Model():
             print('Randomizing weights')
             self.model.init_weights()
 
+        #print(dir(self.model.uniter.embeddings))
+        #print(dir(self.model.uniter.embeddings.word_embeddings))
         #print(self.model[0].uniter)
         #print(dir(self.model[0].uniter))
         #print(dir(self.model[0].uniter.encoder))
@@ -93,7 +95,7 @@ class Model():
             # construct all the hooks
             # word embeddings will be layer -1
             # TODO-RADI: change to attributes of UNITER - find what the embedding layer is called
-            handles.append(self.model.uniter.embeddings.register_forward_hook(
+            handles.append(self.model.uniter.embeddings.word_embeddings.register_forward_hook(
                     partial(extract_representation_hook,
                             position=position,
                             representations=representation,
@@ -103,7 +105,7 @@ class Model():
             # TODO-RADI: BertLayer has attention, intermediate and output - which one should we intervene on?
             for layer in range(self.num_layers):
                 handles.append(self.model.uniter.encoder.layer[layer]\
-                                   .output.register_forward_hook(
+                                   .output.dropout.register_forward_hook(
                     partial(extract_representation_hook,
                             position=position,
                             representations=representation,
@@ -113,22 +115,19 @@ class Model():
             # print(next(self.model.parameters()).device)
             # print(self.device)
             logits = self.model(context, compute_loss=False)
+            #print(logits)
             for h in handles:
                 h.remove()
         # print(representation[0][:5])
         return representation
 
-    def get_probabilities_for_examples(self, context, candidates):
+    def get_probabilities_for_examples(self, context):
         """Return probabilities of single-token candidates given context"""
         # TODO-RADI: this can be simpler since there are only two options; make sure to get the probabilities from the linear classifier
-        for c in candidates:
-            if len(c) > 1:
-                raise ValueError(f"Multiple tokens not allowed: {c}")
-        outputs = [c[0] for c in candidates]
-        logits, past = self.model(context)[:2]
-        logits = logits[:, -1, :]
+
+        logits = self.model(context, compute_loss = False)
         probs = F.softmax(logits, dim=-1)
-        return probs[:, outputs].tolist()
+        return probs.tolist()
 
     def get_probabilities_for_examples_multitoken(self, context, candidates):
         """
@@ -188,6 +187,9 @@ class Model():
             neurons = torch.LongTensor(neurons).to(self.device)
             # First grab the position across batch
             # Then, for each element, get correct index w/ gather
+            # print(input[0].shape)
+            # print(output.shape)
+            # print(neurons.shape)
             base = output[:, position, :].gather(
                 1, neurons)
             intervention_view = intervention.view_as(base)
@@ -208,7 +210,23 @@ class Model():
 
         # Set up the context as batch
         batch_size = len(neurons)
-        context = context.unsqueeze(0).repeat(batch_size, 1)
+
+        # TODO-RADI: can't batch this since the context is in dict form
+        #context = context.unsqueeze(0).repeat(batch_size, 1)
+        #print(context)
+
+        batch_context = {}
+        for key, value in context.items():
+            try:
+                if len(value.shape) == 2:
+                    batch_context[key] = value.repeat(batch_size,1)
+
+                elif len(value.shape) == 3:
+                    batch_context[key] = value.repeat(batch_size, 1, 1)
+
+            except AttributeError:
+                continue
+
         handle_list = []
         for layer in set(layers):
           neuron_loc = np.where(np.array(layers) == layer)[0]
@@ -216,9 +234,11 @@ class Model():
           for n in neurons:
             unsorted_n_list = [n[i] for i in neuron_loc]
             n_list.append(list(np.sort(unsorted_n_list)))
+          #print(n_list)
+          #print(rep[layer].shape)
           intervention_rep = alpha * rep[layer][n_list]
           if layer == -1:
-              wte_intervention_handle = self.model.transformer.wte.register_forward_hook(
+              wte_intervention_handle = self.model.uniter.embeddings.word_embeddings.register_forward_hook(
                   partial(intervention_hook,
                           position=position,
                           neurons=n_list,
@@ -226,8 +246,8 @@ class Model():
                           intervention_type=intervention_type))
               handle_list.append(wte_intervention_handle)
           else:
-              mlp_intervention_handle = self.model.transformer.h[layer]\
-                                            .mlp.register_forward_hook(
+              mlp_intervention_handle = self.model.uniter.encoder.layer[layer]\
+                                            .output.dropout.register_forward_hook(
                   partial(intervention_hook,
                           position=position,
                           neurons=n_list,
@@ -235,8 +255,7 @@ class Model():
                           intervention_type=intervention_type))
               handle_list.append(mlp_intervention_handle)
         new_probabilities = self.get_probabilities_for_examples(
-            context,
-            outputs)
+            batch_context)
         for hndle in handle_list:
           hndle.remove()
         return new_probabilities
@@ -261,12 +280,13 @@ class Model():
     #
     #     return word2intervention_results
 
+    # TODO-RADI: change bsize back to 800 when the parallel stuff is ok
     def neuron_intervention_single_experiment(self,
                                               intervention,
                                               intervention_type, layers_to_adj=[],
                                               neurons_to_adj=[],
                                               alpha=100,
-                                              bsize=800, intervention_loc='all'):
+                                              bsize=500, intervention_loc='all'):
         """
         run one full neuron intervention experiment
         """
@@ -308,14 +328,21 @@ class Model():
             # Probabilities without intervention (Base case)
             # TODO-RADI: calculate for non-negated and negated; simplify cause candidate 1 and 2 are just true and false (only two candidates in prediction)
             candidate1_base_prob, candidate2_base_prob = self.get_probabilities_for_examples(
-                intervention.base_strings_tok[0].unsqueeze(0),
-                intervention.candidates_tok)[0]
+                intervention[0])[0]
             candidate1_alt1_prob, candidate2_alt1_prob = self.get_probabilities_for_examples(
-                intervention.base_strings_tok[1].unsqueeze(0),
-                intervention.candidates_tok)[0]
-            candidate1_alt2_prob, candidate2_alt2_prob = self.get_probabilities_for_examples(
-                intervention.base_strings_tok[2].unsqueeze(0),
-                intervention.candidates_tok)[0]
+                intervention[1])[0]
+
+
+            # candidate1_base_prob, candidate2_base_prob = self.get_probabilities_for_examples(
+            #     intervention.base_strings_tok[0].unsqueeze(0),
+            #     intervention.candidates_tok)[0]
+            # candidate1_alt1_prob, candidate2_alt1_prob = self.get_probabilities_for_examples(
+            #     intervention.base_strings_tok[1].unsqueeze(0),
+            #     intervention.candidates_tok)[0]
+            # candidate1_alt2_prob, candidate2_alt2_prob = self.get_probabilities_for_examples(
+            #     intervention.base_strings_tok[2].unsqueeze(0),
+            #     intervention.candidates_tok)[0]
+
             # Now intervening on potentially biased example
             if intervention_loc == 'all':
               # TODO-RADI: might need to change this for UNITER; also can simplify since the probs add up to 1
@@ -331,13 +358,23 @@ class Model():
 
                     probs = self.neuron_intervention(
                         context=context,
-                        outputs=intervention.candidates_tok,
+                        outputs=[0,1],
                         rep=rep,
                         layers=layers_to_search,
                         neurons=neurons_to_search,
-                        position=intervention.position,
+                        position=0,
                         intervention_type=replace_or_diff,
                         alpha=alpha)
+                    # probs = self.neuron_intervention(
+                    #     context=context,
+                    #     outputs=intervention.candidates_tok,
+                    #     rep=rep,
+                    #     layers=layers_to_search,
+                    #     neurons=neurons_to_search,
+                    #     position=intervention.position,
+                    #     intervention_type=replace_or_diff,
+                    #     alpha=alpha)
+
                     for neuron, (p1, p2) in zip(neurons, probs):
                         candidate1_probs[layer + 1][neuron] = p1
                         candidate2_probs[layer + 1][neuron] = p2
@@ -379,7 +416,6 @@ class Model():
 
         return (candidate1_base_prob, candidate2_base_prob,
                 candidate1_alt1_prob, candidate2_alt1_prob,
-                candidate1_alt2_prob, candidate2_alt2_prob,
                 candidate1_probs, candidate2_probs)
 
 

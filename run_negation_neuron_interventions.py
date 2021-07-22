@@ -73,13 +73,13 @@ def load_examples(opts, train_opts):
 
 def run_all(
     opts,
-    model_type="gpt2",
+    model_type="UNITER-base",
     device="cuda",
     out_dir=".",
     random_weights=False,
     template_indices=None,
 ):
-    print("Model:", model_type, flush=True)
+    #print("Model:", model_type, flush=True)
     # Set up all the potential combinations.
     # TODO-RADI: we don't need these since we iterate over already constructed examples
     # professions = get_profession_list()
@@ -87,11 +87,11 @@ def run_all(
     # TODO-RADI: implement the loading function
     train_opts = Struct(json.load(open(f'{opts.train_dir}/log/hps.json')))
     loaded_examples = load_examples(opts, train_opts)
-    print(len(loaded_examples))
+    #print(len(loaded_examples))
 
     #loaded_examples = loaded_examples.to(device)
     intervention_types = get_intervention_types()
-    print(intervention_types)
+    #print(intervention_types)
     # Initialize Model and Tokenizer.
     # TODO-RADI: initialise UNITER
     # TODO-RADI: we don't need the tokenizer cause the data is already preprocessed
@@ -116,13 +116,17 @@ def run_all(
     # TODO-RADI: iterate over the constructed examples
     # for temp in templates:
     for example_pair in loaded_examples:
+        id1 = example_pair[0]['qids'][0]
+        id2 = example_pair[1]['qids'][0]
+        print(example_pair[1]['input_ids'].shape)
         # TODO-RADI: don't need this
         # print("Running template '{}' now...".format(temp), flush=True)
+        print(f"Running with ids: {id1}, {id2}", flush=True)
         # # Fill in all professions into current template
         # interventions = construct_interventions(temp, professions, tokenizer, device)
         # Consider all the intervention types
         for itype in intervention_types:
-            print(len(example_pair))
+
             print("\t Running with intervention: {}".format(itype), flush=True)
             # Run actual exp.
             # TODO-RADI: make sure the neuron_intervention_experiment function takes an example pair as input
@@ -130,14 +134,14 @@ def run_all(
                 example_pair, itype, alpha=1.0
             )
 
-            # df = convert_results_to_pd(interventions, intervention_results)
-            # # Generate file name.
-            # temp_string = "_".join(temp.replace("{}", "X").split())
-            # model_type_string = model_type
-            # fname = "_".join([temp_string, itype, model_type_string])
-            # # Finally, save each exp separately.
-            # df.to_csv(os.path.join(base_path, fname + ".csv"))
-            #
+            df = convert_results_to_pd(example_pair, intervention_results)
+            # Generate file name.
+            #temp_string = "_".join(temp.replace("{}", "X").split())
+            model_type_string = model_type
+            fname = "_".join([id1, id2, itype, model_type_string])
+            # Finally, save each exp separately.
+            df.to_csv(os.path.join(base_path, fname + ".csv"))
+
 
 if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -173,7 +177,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="distilgpt2",
+        default="UNITER-base",
         help="""Model type [distilgpt2, gpt-2, etc.].""",
     )
 
