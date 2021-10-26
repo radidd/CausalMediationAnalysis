@@ -1,4 +1,9 @@
-## Mediation Analysis
+Code and data for the experiments in the paper Investigating Negation in Pre-trained Vision-and-language Models.
+
+### Under construction
+This repository is still under construction, thank you for your patience.
+
+<!-- ## Mediation Analysis
 
 This repository contains the code to replicate the experiments for the paper [Causal Mediation Analysis for Interpreting Neural NLP: The Case of Gender Bias](https://arxiv.org/abs/2004.12265).
 
@@ -56,3 +61,4 @@ Additionally, the average odds ratio for each layer and each neuron will be stor
 Script takes in model_type (gpt-2 version), algo (greedy or topk), k (int), layer (-1 to select neurons from entire model and 0-12 for specific layer) and out_dir (base directory for results). Currently, only compatible with GPT-2.
 
 `python neuron_intervention_subset_selection.py --algo greedy --k 10 \ --layer -1 --out_dir results`
+ -->
